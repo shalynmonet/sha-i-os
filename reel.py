@@ -102,7 +102,16 @@ if __name__ == "__main__":
     parser.add_argument("--caption", help="exact on-screen caption")
     parser.add_argument("--hook", help="topic; Nemotron Nano writes the caption")
     parser.add_argument("--music", type=Path, help="background audio file")
+    parser.add_argument("--queue-post", metavar="VENTURE", help="queue a post of this reel for approval")
     args = parser.parse_args()
     files = media_in(args.inputs[0]) if len(args.inputs) == 1 and args.inputs[0].is_dir() else args.inputs
-    out = build(files, args.out, args.clip_seconds, args.max_seconds, args.caption, args.hook, args.music)
+    if args.hook and not args.caption:  # write it here so the queued post gets the same caption
+        args.caption = write_hook(args.hook)
+        print(f"Caption from Nemotron: {args.caption}")
+    out = build(files, args.out, args.clip_seconds, args.max_seconds, args.caption, music=args.music)
     print(f"Reel saved to {out}")
+    if args.queue_post:
+        import approvals
+        action_id = approvals.request("post", f"Post reel {out.name}", {"file": str(out), "caption": args.caption or ""},
+                                      venture=args.queue_post, requested_by="reel.py")
+        print(f"Queued for approval as #{action_id}: python approvals.py show {action_id}")
