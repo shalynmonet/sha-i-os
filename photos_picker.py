@@ -3,6 +3,7 @@
     python photos_picker.py                 # pick, download to data/picked/<session>
     python photos_picker.py --reel          # ...then build a reel from the picks
     python photos_picker.py --max 10        # cap how many items can be picked
+    python photos_picker.py --inbox         # pick screenshots into the inspiration inbox
 
 One-time setup: in Google Cloud Console enable the "Photos Picker API", create an
 OAuth client of type "Desktop app", download its JSON to
@@ -163,32 +164,51 @@ def list_items(session_id: str) -> list[dict]:
             return items
 
 
-def download(item: dict, folder: Path, token: str) -> Path:
+IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def download(item: dict, folder: Path, token: str, max_side: int | None = None) -> Path:
+    """Download one pick. With max_side, photos come as a resized JPEG/PNG instead of
+    the original, which avoids HEIC files the vision model can't read."""
     media = item["mediaFile"]
-    suffix = "=dv" if item.get("type") == "VIDEO" else "=d"  # original video / full-res photo
-    name = media.get("filename") or f"{item['id']}.bin"
-    dest = folder / name
+    is_video = item.get("type") == "VIDEO"
+    if is_video:
+        suffix = "=dv"  # original video
+    else:
+        suffix = f"=w{max_side}-h{max_side}" if max_side else "=d"  # resized / full-res photo
+    name = Path(media.get("filename") or f"{item['id']}.bin")
     req = urllib.request.Request(media["baseUrl"] + suffix, headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req) as resp, open(dest, "wb") as out:
-        while chunk := resp.read(1 << 20):
-            out.write(chunk)
+    with urllib.request.urlopen(req) as resp:
+        content_type = (getattr(resp, "headers", None) or {}).get("Content-Type", "").split(";")[0]
+        if max_side and not is_video and content_type in IMAGE_TYPES:
+            name = name.with_suffix(IMAGE_TYPES[content_type])
+        dest = folder / name.name
+        if dest.exists():  # keep earlier picks with the same filename
+            dest = folder / f"{name.stem}_{item['id'][-8:]}{name.suffix}"
+        with open(dest, "wb") as out:
+            while chunk := resp.read(1 << 20):
+                out.write(chunk)
     return dest
 
 
-def pick(max_items: int | None = None) -> Path:
-    """Run the full flow and return the folder holding the downloaded picks."""
+def pick(max_items: int | None = None, folder: Path | None = None, photos_only: bool = False,
+         max_side: int | None = None) -> Path:
+    """Run the full flow and return the folder holding the downloaded picks
+    (data/picked/<session> unless `folder` is given)."""
     session = create_session(max_items)
     uri = session["pickerUri"]
-    print(f"Pick your clips here (opening in browser): {uri}")
+    print(f"Pick here (opening in browser): {uri}")
     webbrowser.open(uri)
     try:
         wait_for_selection(session)
         items = list_items(session["id"])
-        folder = PICKED_DIR / session["id"]
+        if photos_only:
+            items = [i for i in items if i.get("type") != "VIDEO"]
+        folder = Path(folder or PICKED_DIR / session["id"])
         folder.mkdir(parents=True, exist_ok=True)
         token = access_token()
         for i, item in enumerate(items, 1):
-            path = download(item, folder, token)
+            path = download(item, folder, token, max_side)
             print(f"  [{i}/{len(items)}] {path.name}")
         return folder
     finally:
@@ -200,7 +220,13 @@ if __name__ == "__main__":
     parser.add_argument("--max", type=int, help="max items the picker allows")
     parser.add_argument("--reel", action="store_true", help="build a reel from the picks")
     parser.add_argument("--hook", help="topic for a Nemotron-written caption on the reel")
+    parser.add_argument("--inbox", action="store_true", help="pick screenshots into the inspiration inbox and tag them")
     args = parser.parse_args()
+    if args.inbox:
+        import inbox
+        pick(args.max, folder=inbox.INBOX_DIR, photos_only=True, max_side=2048)
+        print(f"Tagged {inbox.run_once(settle=0)} new item(s).")
+        sys.exit()
     folder = pick(args.max)
     print(f"Saved picks to {folder}")
     if args.reel:

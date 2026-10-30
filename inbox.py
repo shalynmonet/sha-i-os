@@ -91,12 +91,12 @@ def tag(content: str) -> dict:
     return {"venture": venture, "tags": tags, "summary": str(result.get("summary", "")), "confidence": confidence}
 
 
-def pending_files(inbox: Path) -> list[Path]:
+def pending_files(inbox: Path, settle: float = SETTLE_SECONDS) -> list[Path]:
     now = time.time()
     return sorted(
         p for p in inbox.iterdir()
         if p.is_file() and p.suffix.lower() in IMAGE_EXTS | NOTE_EXTS
-        and now - p.stat().st_mtime >= SETTLE_SECONDS
+        and now - p.stat().st_mtime >= settle
     )
 
 
@@ -121,11 +121,12 @@ def process(path: Path, conn: sqlite3.Connection) -> dict | None:
     return row
 
 
-def run_once(inbox: Path = INBOX_DIR, conn: sqlite3.Connection | None = None) -> int:
+def run_once(inbox: Path = INBOX_DIR, conn: sqlite3.Connection | None = None,
+             settle: float = SETTLE_SECONDS) -> int:
     inbox.mkdir(parents=True, exist_ok=True)
     conn = conn or connect()
     count = 0
-    for path in pending_files(inbox):
+    for path in pending_files(inbox, settle):
         row = process(path, conn)
         if row:
             count += 1

@@ -48,9 +48,16 @@ def inbox_page():
         files = st.file_uploader("Add screenshots or notes", accept_multiple_files=True,
                                  type=[e.lstrip(".") for e in inbox.IMAGE_EXTS | inbox.NOTE_EXTS])
         add = st.form_submit_button("Add and tag")
-    scan = st.button("Scan inbox folder")
+    b1, b2 = st.columns(2)
+    from_photos = b1.button("Pick screenshots from Google Photos", type="primary")
+    scan = b2.button("Scan inbox folder")
 
     conn = db()
+    if from_photos:
+        import photos_picker
+        with st.spinner("Finish picking in the Google Photos tab that just opened, then Nemotron tags them..."):
+            photos_picker.pick(folder=inbox.INBOX_DIR, photos_only=True, max_side=2048)
+            st.toast(f"Added {inbox.run_once(conn=conn, settle=0)} item(s) from Google Photos")
     if add and files:
         inbox.INBOX_DIR.mkdir(parents=True, exist_ok=True)
         with st.spinner("Tagging with Nemotron..."):
