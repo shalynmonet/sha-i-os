@@ -1,3 +1,4 @@
 ﻿openai
 moviepy
 python-dotenv
+streamlit
